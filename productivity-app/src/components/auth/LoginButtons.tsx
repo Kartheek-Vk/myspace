@@ -1,0 +1,137 @@
+import React from 'react';
+import { GoogleLogin, CredentialResponse } from '@react-oauth/google';
+import { useAuthStore, User } from '../../store/authStore';
+import { Loader2, ArrowRight } from 'lucide-react';
+import apiClient from '../../services/api';
+
+interface LoginButtonsProps {
+  onSuccess?: () => void;
+}
+
+export const LoginButtons: React.FC<LoginButtonsProps> = ({ onSuccess }) => {
+  const { login, enterGuestMode, setError, setLoading, isLoading } = useAuthStore();
+  const hasGoogleClientId = import.meta.env.VITE_GOOGLE_CLIENT_ID &&
+    import.meta.env.VITE_GOOGLE_CLIENT_ID !== 'YOUR_GOOGLE_CLIENT_ID.apps.googleusercontent.com';
+
+  /**
+   * Handle Google Sign-In success.
+   * 
+   * Flow:
+   * 1. Google returns a credential (Google ID token)
+   * 2. Send credential to backend /api/auth/google
+   * 3. Backend verifies token, creates/finds user, generates MySpace JWT
+   * 4. Store user + JWT in authStore
+   */
+  const handleGoogleSuccess = async (credentialResponse: CredentialResponse) => {
+    setLoading(true);
+    setError(null);
+    try {
+      if (!credentialResponse.credential) {
+        throw new Error('No credential received from Google');
+      }
+
+      // Send Google credential to our backend for verification
+      const response = await apiClient.post('/auth/google', {
+        credential: credentialResponse.credential,
+      });
+
+      const data = response.data;
+
+      if (!data.success) {
+        throw new Error(data.message || data.error || 'Authentication failed');
+      }
+
+      // Backend returns: { success, user, accessToken, tokenType }
+      const user: User = {
+        id: data.user.id,
+        email: data.user.email,
+        name: data.user.name,
+        picture: data.user.picture || '',
+        googleId: data.user.googleId || data.user.id,
+      };
+
+      // Store MySpace JWT (not the Google credential)
+      login(user, data.accessToken);
+
+      if (onSuccess) setTimeout(onSuccess, 400);
+    } catch (err: any) {
+      const message = err.response?.data?.message || err.response?.data?.error || err.message || 'Failed to sign in with Google';
+      setError(message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleGoogleError = () => {
+    setError('Google sign-in was cancelled or failed. Please try again.');
+  };
+
+  const handleGuestLogin = () => {
+    setLoading(true);
+    setError(null);
+    setTimeout(() => {
+      enterGuestMode();
+      setLoading(false);
+      if (onSuccess) setTimeout(onSuccess, 300);
+    }, 500);
+  };
+
+  if (isLoading) {
+    return (
+      <div className="flex flex-col items-center gap-3">
+        <div className="flex items-center justify-center gap-2 px-6 py-3.5 rounded-xl bg-white border border-slate-200 shadow-sm w-[280px]">
+          <Loader2 size={18} className="animate-spin text-blue-600" />
+          <span className="text-sm font-medium text-slate-700">Signing you in...</span>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex flex-col items-center gap-3">
+      {/* Google Button */}
+      {hasGoogleClientId ? (
+        <GoogleLogin
+          onSuccess={handleGoogleSuccess}
+          onError={handleGoogleError}
+          size="large"
+          theme="outline"
+          shape="rectangular"
+          text="continue_with"
+          width={280}
+          locale="en"
+        />
+      ) : (
+        <div className="flex items-center justify-center gap-3 px-6 py-3 rounded-lg bg-slate-100 border border-slate-200 w-[280px]">
+          <svg width="18" height="18" viewBox="0 0 24 24">
+            <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 0 1-2.2 3.32v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.1z" fill="#9CA3AF"/>
+            <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#9CA3AF"/>
+            <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#9CA3AF"/>
+            <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#9CA3AF"/>
+          </svg>
+          <span className="text-sm font-medium text-slate-400">Set VITE_GOOGLE_CLIENT_ID</span>
+        </div>
+      )}
+
+      {/* Divider */}
+      <div className="flex items-center gap-3 w-[280px]">
+        <div className="flex-1 h-px bg-slate-200" />
+        <span className="text-xs text-slate-400">or</span>
+        <div className="flex-1 h-px bg-slate-200" />
+      </div>
+
+      {/* Continue without login */}
+      <button
+        onClick={handleGuestLogin}
+        className="flex items-center justify-center gap-2 px-6 py-3 rounded-lg bg-slate-50 border border-slate-200 hover:bg-slate-100 hover:border-slate-300 transition-all duration-200 w-[280px] group"
+      >
+        <span className="text-sm font-medium text-slate-700">Continue without login</span>
+        <ArrowRight size={14} className="text-slate-400 group-hover:text-slate-600 group-hover:translate-x-0.5 transition-all" />
+      </button>
+
+      <p className="text-xs text-slate-400 max-w-[260px] text-center mt-1">
+        Start instantly. Sign in later to save your progress to your account.
+      </p>
+    </div>
+  );
+};
